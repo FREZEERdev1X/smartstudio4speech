@@ -1,0 +1,6 @@
+{
+  "name": "Smart TTS Studio",
+  "description": "A high-quality text-to-speech application supporting multiple languages and long texts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
