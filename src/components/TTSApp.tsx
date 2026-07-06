@@ -100,7 +100,7 @@ export default function TTSApp() {
     setAudioUrl(null);
     
     try {
-      const chunks = chunkText(text, 1000); // 1000 characters chunk to be safe
+      const chunks = chunkText(text, 200); // 200 characters chunk to prevent timeouts
       const allAudioChunks: string[] = [];
       
       for (let i = 0; i < chunks.length; i++) {
@@ -114,11 +114,12 @@ export default function TTSApp() {
         });
         
         let data;
+        let responseText = '';
         try {
-          const responseText = await response.text();
+          responseText = await response.text();
           data = JSON.parse(responseText);
         } catch (e) {
-          throw new Error('حدث خطأ في الاتصال بالخادم. قد يكون النص طويلاً جداً.');
+          throw new Error('حدث خطأ في الاتصال بالخادم. الاستجابة غير متوقعة: ' + responseText.substring(0, 100));
         }
         
         if (!response.ok) {
