@@ -67,8 +67,26 @@ export default function TTSApp() {
   const [voice, setVoice] = useState('kore');
   
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const chunkText = (text: string, maxLength: number): string[] => {
+    const chunks: string[] = [];
+    const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
+    
+    let currentChunk = '';
+    for (const sentence of sentences) {
+      if (currentChunk.length + sentence.length > maxLength) {
+        if (currentChunk.trim()) chunks.push(currentChunk.trim());
+        currentChunk = sentence;
+      } else {
+        currentChunk += (currentChunk ? ' ' : '') + sentence;
+      }
+    }
+    if (currentChunk.trim()) chunks.push(currentChunk.trim());
+    return chunks.length > 0 ? chunks : [text];
+  };
 
   const generateAudio = async () => {
     if (!text.trim()) {
@@ -78,22 +96,43 @@ export default function TTSApp() {
     
     setError(null);
     setIsGenerating(true);
+    setProgress(0);
     setAudioUrl(null);
     
     try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language, voice })
-      });
+      const chunks = chunkText(text, 1000); // 1000 characters chunk to be safe
+      const allAudioChunks: string[] = [];
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'حدث خطأ أثناء التحويل');
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        if (!chunk.trim()) continue;
+        
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chunk, language, voice })
+        });
+        
+        let data;
+        try {
+          const responseText = await response.text();
+          data = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error('حدث خطأ في الاتصال بالخادم. قد يكون النص طويلاً جداً.');
+        }
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'حدث خطأ أثناء التحويل');
+        }
+
+        if (data.audioChunks && data.audioChunks.length > 0) {
+          allAudioChunks.push(...data.audioChunks);
+        }
+        
+        setProgress(Math.round(((i + 1) / chunks.length) * 100));
       }
 
-      if (!data.audioChunks || data.audioChunks.length === 0) {
+      if (allAudioChunks.length === 0) {
         throw new Error('لم يتم استلام أي بيانات صوتية');
       }
 
@@ -102,7 +141,7 @@ export default function TTSApp() {
       
       // Decode all chunks (Gemini TTS returns 24000Hz 16-bit PCM mono)
       const buffers = await Promise.all(
-        data.audioChunks.map(async (b64: string) => {
+        allAudioChunks.map(async (b64: string) => {
           const arrayBuffer = await base64ToArrayBuffer(b64);
           const pcm16 = new Int16Array(arrayBuffer);
           const float32 = new Float32Array(pcm16.length);
@@ -146,27 +185,41 @@ export default function TTSApp() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans" dir="rtl">
-      <div className="max-w-5xl mx-auto px-4 py-12">
-        <header className="mb-10 text-center flex flex-col items-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-6 shadow-lg shadow-indigo-600/20">
-            <Volume2 className="w-8 h-8 text-white" />
+    <div className="min-h-screen bg-slate-50 font-sans flex flex-col" dir="rtl">
+      <nav className="flex items-center justify-between px-8 py-4 bg-white border-b border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/20">
+            <Volume2 className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-800 tracking-tight mb-3">استوديو الصوت الذكي</h1>
-          <p className="text-slate-500 text-base max-w-xl mx-auto">
-            قم بتحويل النصوص الطويلة إلى صوت بشري واقعي بدقة عالية. ادعم ملفات ضخمة بلا حدود وصيغ تحميل متعددة.
+          <span className="text-xl font-bold tracking-tight text-slate-800">VoxReal AI</span>
+        </div>
+        <div className="flex items-center gap-6 text-sm font-medium text-slate-500">
+          <button className="text-indigo-600 hover:text-indigo-700 transition-colors">الاستوديو</button>
+          <button className="hover:text-slate-800 transition-colors">المكتبة</button>
+          <button className="hover:text-slate-800 transition-colors">الإعدادات</button>
+        </div>
+        <div className="w-10 h-10 rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center">
+          <span className="text-xs font-bold text-slate-500">م.أ</span>
+        </div>
+      </nav>
+
+      <div className="flex-1 max-w-6xl w-full mx-auto px-4 py-8">
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">تحويل النص إلى صوت بشري</h1>
+          <p className="text-slate-500 text-base">
+            قم بتحويل النصوص الطويلة إلى صوت واقعي بدقة عالية. ادعم ملفات ضخمة بلا حدود مع إمكانية التحميل.
           </p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 flex-1 flex flex-col">
-              <div className="flex items-center justify-between mb-4 px-2">
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex-1 flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <label className="block text-sm font-semibold text-slate-700">
                   النص المراد تحويله
                 </label>
-                <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">
+                <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono font-medium border border-slate-200">
                   {text.trim().split(/\s+/).filter(Boolean).length} / 5000 كلمة
                 </span>
               </div>
@@ -174,7 +227,7 @@ export default function TTSApp() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="أدخل النص هنا للتحويل..."
-                className="w-full min-h-[320px] p-6 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 resize-none text-slate-700 text-lg leading-relaxed placeholder:text-slate-400 outline-none"
+                className="w-full min-h-[360px] p-5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 resize-none text-slate-700 text-lg leading-relaxed placeholder:text-slate-400 outline-none transition-all"
               />
             </div>
 
@@ -184,7 +237,7 @@ export default function TTSApp() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="flex items-center gap-3 p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100"
+                  className="flex items-center gap-3 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100"
                 >
                   <AlertCircle className="w-5 h-5 shrink-0" />
                   <p className="text-sm font-medium">{error}</p>
@@ -196,32 +249,31 @@ export default function TTSApp() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200"
+                className="bg-white rounded-2xl p-6 shadow-sm border border-green-200"
               >
-                <div className="flex items-center gap-3 mb-4 text-green-600">
+                <div className="flex items-center gap-3 mb-4 text-green-700">
                   <div className="p-1 bg-green-100 rounded-full">
                     <Check className="w-4 h-4" />
                   </div>
-                  <span className="font-medium text-sm">اكتمل التحويل بنجاح!</span>
+                  <span className="font-semibold text-sm">اكتمل التحويل بنجاح!</span>
                 </div>
                 <audio src={audioUrl} controls className="w-full mb-6" />
                 <div className="flex gap-3">
                   <a
                     href={audioUrl}
                     download="audio_output.wav"
-                    className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-medium transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-medium transition-colors shadow-sm"
                   >
                     <Download className="w-4 h-4" />
                     <span>تحميل بصيغة WAV</span>
                   </a>
-                  {/* You could add more download formats here if a converter exists, but WAV is standard uncompressed. */}
                 </div>
               </motion.div>
             )}
           </div>
 
           <div className="space-y-6">
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col gap-6">
               <div className="flex items-center gap-2 text-slate-800 border-b border-slate-100 pb-4">
                 <Settings2 className="w-5 h-5 text-indigo-600" />
                 <h3 className="font-bold text-lg">إعدادات الصوت</h3>
@@ -229,12 +281,12 @@ export default function TTSApp() {
 
               <div className="space-y-6">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">اللغة المستهدفة</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">اللغة المستهدفة</label>
                   <div className="relative">
                     <select
                       value={language}
                       onChange={(e) => setLanguage(e.target.value)}
-                      className="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                      className="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 font-medium transition-all"
                     >
                       {LANGUAGES.map((lang) => (
                         <option key={lang.code} value={lang.code}>
@@ -246,25 +298,25 @@ export default function TTSApp() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">نبرة الصوت</label>
-                  <div className="grid grid-cols-1 gap-2">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">نبرة الصوت</label>
+                  <div className="grid grid-cols-1 gap-3">
                     {VOICES.map((v) => (
                       <button
                         key={v.id}
                         onClick={() => setVoice(v.id)}
-                        className={`text-right p-3 rounded-xl border transition-all ${
+                        className={`text-right p-4 rounded-xl border transition-all ${
                           voice === v.id
-                            ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-500'
-                            : 'bg-slate-50 border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100'
+                            ? 'bg-indigo-50/50 border-indigo-300 ring-1 ring-indigo-500'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                         }`}
                       >
                         <div className="flex justify-between items-start">
                           <span className={`font-semibold ${voice === v.id ? 'text-indigo-900' : 'text-slate-700'}`}>{v.name}</span>
                           {voice === v.id && (
-                            <span className="text-[10px] bg-indigo-100 px-2 py-0.5 rounded text-indigo-700 font-bold">محدد</span>
+                            <span className="text-[10px] bg-indigo-100 px-2 py-0.5 rounded text-indigo-700 font-bold border border-indigo-200">محدد</span>
                           )}
                         </div>
-                        <p className={`text-xs mt-1 ${voice === v.id ? 'text-indigo-600' : 'text-slate-500'}`}>{v.description}</p>
+                        <p className={`text-xs mt-1.5 ${voice === v.id ? 'text-indigo-600' : 'text-slate-500'}`}>{v.description}</p>
                       </button>
                     ))}
                   </div>
@@ -274,23 +326,27 @@ export default function TTSApp() {
               <button
                 onClick={generateAudio}
                 disabled={isGenerating || !text.trim()}
-                className="w-full mt-4 flex items-center justify-center gap-2 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-xl font-semibold transition-all shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+                className="w-full mt-4 flex items-center justify-center gap-2 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl font-semibold transition-all shadow-md shadow-indigo-600/20 disabled:shadow-none active:scale-[0.98]"
               >
                 {isGenerating ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>جاري التوليد بدقة عالية...</span>
-                  </>
+                  <div className="flex flex-col items-center gap-1.5 w-full">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري المعالجة ({progress}%)...</span>
+                    </div>
+                    <div className="w-full bg-indigo-800/30 rounded-full h-1 mt-1 overflow-hidden">
+                      <div className="bg-white h-1 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <Play className="w-5 h-5" />
-                    <span>تحويل النص إلى صوت</span>
+                    <span>توليد الصوت</span>
                   </>
                 )}
               </button>
             </div>
           </div>
-
         </div>
       </div>
     </div>

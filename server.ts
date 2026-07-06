@@ -47,32 +47,25 @@ app.post('/api/tts', async (req, res) => {
     }
 
     const ai = getAI();
-    // 2000 chars is a safe chunk size for TTS to avoid timeout
-    const chunks = chunkText(text, 2000); 
     const audioChunksBase64: string[] = [];
 
-    // Process sequentially to maintain order and avoid rate limits
-    for (const chunk of chunks) {
-      if (!chunk.trim()) continue;
-      
-      const interaction = await ai.interactions.create({
-        model: 'gemini-3.1-flash-tts-preview',
-        input: chunk,
-        response_modalities: ['audio'],
-        generation_config: {
-          speech_config: [{
-            voice: voice || "Kore",
-            language: language || "ar-SA"
-          }]
-        }
-      });
+    const interaction = await ai.interactions.create({
+      model: 'gemini-3.1-flash-tts-preview',
+      input: text,
+      response_modalities: ['audio'],
+      generation_config: {
+        speech_config: [{
+          voice: voice || "Kore",
+          language: language || "ar-SA"
+        }]
+      }
+    });
 
-      for (const step of interaction.steps) {
-        if (step.type === 'model_output' && step.content) {
-          const audioContent = step.content.find((c: any) => c.mime_type && c.mime_type.startsWith('audio/'));
-          if (audioContent && (audioContent as any).data) {
-            audioChunksBase64.push((audioContent as any).data);
-          }
+    for (const step of interaction.steps) {
+      if (step.type === 'model_output' && step.content) {
+        const audioContent = step.content.find((c: any) => c.mime_type && c.mime_type.startsWith('audio/'));
+        if (audioContent && (audioContent as any).data) {
+          audioChunksBase64.push((audioContent as any).data);
         }
       }
     }
